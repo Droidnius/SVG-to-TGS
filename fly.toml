@@ -2,7 +2,7 @@
 # Cambia "app" por el nombre único que elijas al crear la app en Fly.
 
 app = "mi-svg-tgs-bot"
-primary_region = "bog"  # Bogotá, Colombia
+primary_region = "gru"  # Sao Paulo, Brasil
 
 [build]
 
@@ -20,5 +20,5 @@ primary_region = "bog"  # Bogotá, Colombia
   size = "shared-cpu-1x"
   memory = "512mb"
 
-[restart]
+[[restart]]
   policy = "always"
