@@ -162,7 +162,7 @@ def count_lottie_layers(tgs_path: Path) -> int:
         if isinstance(node, dict):
             # "ty": "sh" (path), "el" (elipse), "rc" (rect), etc. son
             # formas reales dentro de un grupo "shapes"; los contamos.
-            if node.get("ty") in ("sh", "el", "rc", "sr", "gr"):
+            if node.get("ty") in ("sh", "el", "rc", "sr"):
                 count += 1
             for value in node.values():
                 walk(value)
