@@ -1,2 +1,3 @@
 python-telegram-bot==21.6
-lottie[all]
+lottie[all]==0.7.2
+lxml==6.0.2
