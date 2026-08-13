@@ -85,6 +85,10 @@ async def handle_svg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # --- FIN DIAGNÓSTICO TEMPORAL ---
 
         try:
+            logger.info(
+                "DIAGNÓSTICO: convirtiendo svg_path=%s (existe=%s, tamaño=%s) -> tgs_path=%s",
+                svg_path, svg_path.exists(), svg_path.stat().st_size if svg_path.exists() else -1, tgs_path,
+            )
             convert_svg_to_tgs(svg_path, tgs_path)
         except Exception as e:
             logger.exception("Fallo en la conversión")
@@ -96,6 +100,16 @@ async def handle_svg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         size = tgs_path.stat().st_size
+
+        # --- DIAGNÓSTICO TEMPORAL: dump completo (el archivo es chico) ---
+        try:
+            with gzip.open(tgs_path, "rt", encoding="utf-8") as f:
+                raw_content = f.read()
+            logger.info("DIAGNÓSTICO: contenido completo del .tgs (%s bytes): %s", size, raw_content)
+        except Exception:
+            logger.exception("DIAGNÓSTICO: no se pudo descomprimir/leer el .tgs para el dump")
+        # --- FIN DIAGNÓSTICO TEMPORAL ---
+
         if size > MAX_TGS_SIZE_BYTES:
             await status_msg.edit_text(
                 f"El .tgs resultante pesa {size / 1024:.1f} KB, por encima del "
