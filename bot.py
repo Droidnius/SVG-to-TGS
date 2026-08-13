@@ -8,6 +8,8 @@ Uso:
 Requisitos: ver requirements.txt
 """
 
+import gzip
+import json
 import logging
 import os
 import subprocess
@@ -15,6 +17,7 @@ import tempfile
 from pathlib import Path
 
 from telegram import Update, InputFile
+from telegram.error import BadRequest
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -69,6 +72,16 @@ async def handle_svg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file = await context.bot.get_file(document.file_id)
         await file.download_to_drive(custom_path=str(svg_path))
 
+        # --- DIAGNÓSTICO TEMPORAL: quitar una vez resuelto el problema ---
+        downloaded_size = svg_path.stat().st_size if svg_path.exists() else -1
+        with open(svg_path, "rb") as f:
+            preview = f.read(200)
+        logger.info(
+            "DIAGNÓSTICO: SVG descargado = %s bytes. Primeros 200 bytes: %r",
+            downloaded_size, preview,
+        )
+        # --- FIN DIAGNÓSTICO TEMPORAL ---
+
         try:
             convert_svg_to_tgs(svg_path, tgs_path)
         except Exception as e:
@@ -90,16 +103,74 @@ async def handle_svg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        await status_msg.edit_text("Conversión lista. Enviando archivo...")
-        await update.message.reply_document(
-            document=InputFile(str(tgs_path), filename="sticker.tgs"),
-            caption=(
-                "Aquí está tu archivo .tgs "
-                f"({size / 1024:.1f} KB). Recuerda: para usarlo como sticker "
-                "real en Telegram debe añadirse a un sticker set animado "
-                "mediante @Stickers o la API (createNewStickerSet)."
-            ),
-        )
+        layer_count = count_lottie_layers(tgs_path)
+        if layer_count == 0:
+            await status_msg.edit_text(
+                f"La conversión terminó pero el resultado quedó casi vacío "
+                f"({size} bytes, sin capas visibles). Esto normalmente pasa "
+                "cuando `lottie_convert.py` no logra interpretar ciertos "
+                "elementos del SVG (grupos anidados, <use>, clip-paths, "
+                "máscaras, gradientes complejos, texto sin convertir a "
+                "path). Prueba aplanando el SVG (todos los grupos "
+                "convertidos a paths simples, sin <use>/<defs> referenciados) "
+                "y vuelve a intentarlo. Si quieres, comparte el SVG y "
+                "reviso qué elemento específico está fallando."
+            )
+            return
+
+        await status_msg.edit_text("Conversión lista. Enviando sticker...")
+        try:
+            await update.message.reply_sticker(
+                sticker=InputFile(str(tgs_path), filename="sticker.tgs"),
+            )
+        except BadRequest as e:
+            logger.warning("Telegram rechazó el .tgs como sticker: %s", e)
+            await update.message.reply_document(
+                document=InputFile(str(tgs_path), filename="sticker.tgs"),
+                caption=(
+                    "Telegram rechazó este archivo como sticker directo "
+                    f"({e}). Te lo mando como .tgs ({size / 1024:.1f} KB) "
+                    "para que lo revises o lo subas manualmente con "
+                    "@Stickers (a veces valida detalles adicionales, como "
+                    "duración exacta o frame rate, que este chequeo básico "
+                    "no cubre)."
+                ),
+            )
+
+
+def count_lottie_layers(tgs_path: Path) -> int:
+    """
+    Descomprime el .tgs y cuenta cuántas formas (shapes) con contenido
+    real tiene el Lottie resultante. Busca de forma recursiva porque en
+    la salida de lottie_convert.py el contenido casi siempre queda
+    anidado dentro de "assets" (el layer de nivel superior suele ser solo
+    una referencia de tipo precomp), no directamente en "layers".
+    """
+    try:
+        with gzip.open(tgs_path, "rt", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        logger.exception("No se pudo leer el .tgs generado para validarlo")
+        return 0
+
+    count = 0
+
+    def walk(node):
+        nonlocal count
+        if isinstance(node, dict):
+            # "ty": "sh" (path), "el" (elipse), "rc" (rect), etc. son
+            # formas reales dentro de un grupo "shapes"; los contamos.
+            if node.get("ty") in ("sh", "el", "rc", "sr", "gr"):
+                count += 1
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(data.get("assets", []))
+    walk(data.get("layers", []))
+    return count
 
 
 def convert_svg_to_tgs(svg_path: Path, tgs_path: Path) -> None:
@@ -116,6 +187,10 @@ def convert_svg_to_tgs(svg_path: Path, tgs_path: Path) -> None:
         "--height", str(STICKER_CANVAS),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    logger.info(
+        "DIAGNÓSTICO: lottie_convert.py returncode=%s stdout=%r stderr=%r",
+        result.returncode, result.stdout, result.stderr,
+    )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "error desconocido en lottie_convert.py")
 
