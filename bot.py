@@ -14,6 +14,8 @@ import logging
 import os
 import subprocess
 import tempfile
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 from telegram import Update, InputFile
@@ -195,12 +197,36 @@ def convert_svg_to_tgs(svg_path: Path, tgs_path: Path) -> None:
         raise RuntimeError(result.stderr.strip() or "error desconocido en lottie_convert.py")
 
 
+class _HealthCheckHandler(BaseHTTPRequestHandler):
+    """Handler mínimo: responde 200 OK a cualquier request. Solo existe
+    para que el healthcheck de Fly.io (u otra plataforma similar) tenga
+    algo que verificar; el bot en sí no usa HTTP para nada."""
+
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+    def log_message(self, format, *args):
+        pass  # silenciar el log de cada ping de healthcheck
+
+
+def start_health_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), _HealthCheckHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    logger.info("Servidor de healthcheck escuchando en el puerto %s", port)
+
+
 def main():
     if not BOT_TOKEN:
         raise SystemExit(
             "Define la variable de entorno TELEGRAM_BOT_TOKEN con el token de tu bot "
             "(obtenido de @BotFather)."
         )
+
+    start_health_server()
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
