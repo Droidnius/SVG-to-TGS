@@ -85,6 +85,7 @@ async def handle_svg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await status_msg.edit_text("La conversión no generó ningún archivo de salida.")
             return
 
+        fix_rounded_rect_radius(tgs_path)
         size = tgs_path.stat().st_size
 
         if size > MAX_TGS_SIZE_BYTES:
@@ -131,6 +132,48 @@ async def handle_svg(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         "no cubre)."
                     ),
                 )
+
+
+def fix_rounded_rect_radius(tgs_path: Path) -> None:
+    """
+    `lottie_convert.py` tiene un bug conocido y consistente: al convertir
+    un <rect rx="N"> de SVG a un shape "rc" (rounded rect) de Lottie,
+    guarda la mitad del radio real (rx=256 -> r=128). Esto se comprobó
+    de forma reproducible con varios valores de rx. Aquí se recorre el
+    Lottie ya generado y se duplica el radio de cada "rc" estático
+    (a=0) para compensarlo. Si el radio está animado (a=1, con
+    keyframes), se deja tal cual porque no aplica este caso simple.
+    """
+    try:
+        with gzip.open(tgs_path, "rt", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        logger.exception("No se pudo leer el .tgs para corregir el radio de esquina")
+        return
+
+    fixed_any = False
+
+    def walk(node):
+        nonlocal fixed_any
+        if isinstance(node, dict):
+            if node.get("ty") == "rc":
+                r = node.get("r")
+                if isinstance(r, dict) and r.get("a") == 0 and isinstance(r.get("k"), (int, float)):
+                    r["k"] = r["k"] * 2
+                    fixed_any = True
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(data.get("assets", []))
+    walk(data.get("layers", []))
+
+    if fixed_any:
+        with gzip.open(tgs_path, "wt", encoding="utf-8") as f:
+            json.dump(data, f, separators=(",", ":"))
+        logger.info("Corregido el radio de esquina de rectángulo(s) redondeado(s) en %s", tgs_path)
 
 
 def count_lottie_layers(tgs_path: Path) -> int:
