@@ -1,24 +1,27 @@
-# Configuración de Fly.io para el bot SVG -> TGS.
-# Cambia "app" por el nombre único que elijas al crear la app en Fly.
+# fly.toml app configuration file generated for mi-svg-tgs-bot on 2026-08-12T17:02:49Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
-app = "mi-svg-tgs-bot"
-primary_region = "gru"  # Sao Paulo, Brasil
+app = 'mi-svg-tgs-bot'
+primary_region = 'gru'
 
 [build]
 
 [processes]
-  app = "python bot.py"
+  app = 'python bot.py'
 
-# IMPORTANTE: a propósito NO hay sección [http_service] ni [[services]].
-# Este bot no escucha ningún puerto (usa polling saliente hacia Telegram),
-# así que no debe tratarse como un servicio web. Si generas este archivo
-# con `fly launch` y te agrega una sección [http_service] con
-# auto_stop_machines = true, bórrala: eso apagaría la máquina pensando
-# que el bot está "inactivo" por no recibir tráfico HTTP.
-
-[[vm]]
-  size = "shared-cpu-1x"
-  memory = "512mb"
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
 
 [[restart]]
-  policy = "always"
+  policy = 'always'
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '512mb'
